@@ -1,0 +1,99 @@
+@RestResource(urlMapping='/whatapp/webhook/v1/*')
+global without sharing class WhatsAppWebHook {
+    private static Final String SIGN_VALID_MESSAGE= 'Signature Verified';
+    private static Final String SIGN_NOTVALID_MESSAGE= 'Signature could not be verified';
+    
+    @HttpGet
+    global static void doGet(){
+          RestResponse rs=RestContext.response;
+          RestRequest rq= RestContext.request;
+        
+        if(rq.params.get('hub.verify_token') == 'WEBSERVICEBYSRI'){
+            rs.responseBody=Blob.valueOf(rq.params.get('hub.challenge'));
+        }
+    }
+    
+    @HttpPost
+    global static void doPost(){
+      RestResponse response=  RestContext.response;
+        response.addHeader('Content-Type','application/json');
+      String resString=  RestContext.request.requestBody.toString();
+       Map<String,String> headers=  RestContext.request.headers;
+       String respValid=    validateSignature(RestContext.request,resString);
+        
+        if(respValid == SIGN_VALID_MESSAGE){
+            System.debug('Header Response from whatsapp\n'+ JSON.serialize(headers));
+               System.debug('Response From Whatsapp\n'+resString);
+            
+            String finalresponse=resString.replace('type', 'typex');
+            
+           WhatsAppMesage parentMessage=(WhatsAppMesage)JSON.deserialize(finalresponse, WhatsAppMesage.class);
+               List<WhatsAppMesage.entry> whatsappentry=parentMessage.entry;
+            
+            if(whatsappentry !=null && whatsappentry.size()>0){
+               WhatsAppMesage.entry entryMessage=whatsappentry.get(0); 
+                
+                List<WhatsAppMesage.changes> whatsappchanges=entryMessage.changes;
+                
+                if(whatsappchanges !=null && whatsappchanges.size()>0){
+                    WhatsAppMesage.changes changemessage=whatsappchanges.get(0);
+                    List<WhatsAppMesage.contacts> whatsappConsList=changemessage.value.contacts;
+                    List<WhatsAppMesage.messages> whatsappMessagesList=changemessage.value.messages;
+                    WhatsAppMesage.metadata metadata=changemessage.value.metadata;
+                    
+                    WA_Message__c salesforceMessage= new WA_Message__c();
+                    salesforceMessage.Business_Phone_Number__c= metadata !=null ? metadata.display_phone_number : null;
+                    
+                    if(whatsappConsList !=null && whatsappConsList.size() >0){
+                       WhatsAppMesage.contacts contacts= whatsappConsList.get(0);
+                       salesforceMessage.Customer_Name__c=contacts.profile.name;
+                       salesforceMessage.Customer_Phone__c=contacts.wa_id;    
+                    }
+                    
+                    if(whatsappMessagesList !=null && whatsappMessagesList.size() >0){
+                        WhatsAppMesage.messages messages=whatsappMessagesList.get(0);
+                        salesforceMessage.Message_Id__c=messages.id;
+                        salesforceMessage.Message_Content__c=messages.text!=null ? messages.text.body : null;
+                        salesforceMessage.Message_Type__c=messages.typex; 
+                        salesforceMessage.Message_Send_Time__c=System.now();
+                        salesforceMessage.Reaction__c=messages.reaction !=null ? messages.reaction.emoji :null;
+                        salesforceMessage.Parent_Message_Id__c=messages.reaction !=null ? messages.reaction.message_id :null;
+                        
+                        //for image 
+                        salesforceMessage.Image__c =messages.image !=null ? messages.image.id : null;
+                        salesforceMessage.Image_Type__c =messages.image !=null ? messages.image.mime_type : null;
+                        salesforceMessage.Image_sha256__c =messages.image !=null ? messages.image.sha256 : null;
+                        
+                        //If message is reply to another messages
+                        salesforceMessage.Parent_Message_Id__c=messages.context !=null ? messages.context.id : null;
+                        
+                        upsert salesforceMessage Message_Id__c;
+
+                    }
+                    
+                }
+            }
+        }else{
+            response.responseBody= Blob.valueOf('{success:false,event:"unknown"}'); 
+            response.statusCode= 401;
+             return;                                   
+        }
+                                                
+          response.statusCode=200;
+          response.responseBody= Blob.valueOf('{success:true,event:"success"}');                                     
+        
+    }
+    
+    global static String validateSignature(RestRequest req , String responseString ){
+         Map<String,String>  headers= req.headers;
+         String whatsAppSignature= headers.get('X-Hub-Signature-256');
+         String whatsAppPayload=RestContext.request.requestBody.toString();
+          String whatsAppSecret =System.Label.fbappsecret;
+       Blob signPayload= Crypto.generateMac('hmacSHA256', Blob.valueOf(whatsAppPayload), Blob.valueOf(whatsAppSecret));
+        
+      String encodedPayloaded='sha256='+EncodingUtil.convertToHex(signPayload);
+        
+      String resMessage = (encodedPayloaded == whatsAppSignature) ? SIGN_VALID_MESSAGE : SIGN_NOTVALID_MESSAGE;
+        return resMessage;
+    }
+}
