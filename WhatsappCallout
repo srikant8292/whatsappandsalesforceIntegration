@@ -1,0 +1,52 @@
+public class WhatsappUtil2 {
+    
+    public static void sendTextMessage(String messageContent, String toPhone){
+        
+        HttpRequest httpReq = new HttpRequest();
+        httpReq.setEndpoint('https://graph.facebook.com/v17.0/110068352116519/messages');
+        httpReq.setMethod('POST');
+        httpReq.setHeader('Content-Type', 'application/json');
+        httpReq.setHeader('Authorization', 'Bearer '+System.Label.whatappaccesstoken);
+        
+        String messageBody = '{'+
+		'    "messaging_product": "whatsapp",'+
+		'    "recipient_type": "individual",'+
+		'    "to": "'+toPhone+'",'+
+		'    "type": "text",'+
+		'    "text": {'+
+		'        "preview_url": false,'+
+		'        "body": "'+messageContent+'"'+
+		'    }'+
+		'}';
+        
+        httpReq.setBody(messageBody);
+        
+        Http http = new Http();
+       
+        try{
+            HttpResponse response = http.send(httpReq);
+            System.debug('Status Code'+response.getStatusCode());
+            if( response.getStatusCode() == 200 ){
+                // Parse & Create Message Record
+                System.debug('Successful!');
+                WhatsAppMessageHandler responseFromWA = (WhatsAppMessageHandler) JSON.deserialize( response.getBody() , WhatsAppMessageHandler.class);
+                WA_Message__c salesforceMessage = new WA_Message__c();
+                salesforceMessage.Message_Content__c = messageContent;
+                salesforceMessage.Customer_Phone__c = toPhone;
+                salesforceMessage.Message_Id__c = responseFromWA.messages.get(0).id;
+                salesforceMessage.Message_Type__c = 'text';
+                upsert salesforceMessage Message_Id__c;
+            }
+            else{
+                System.debug('Error Message'+response.getBody());
+            }
+        }catch(System.CalloutException ex){
+            System.debug(' CalloutException Executed '+ ex.getStackTraceString() );
+            System.debug(' CalloutException Executed '+ ex.getMessage() );
+        }catch(System.Exception ex){
+            System.debug(' System.Exception Executed '+ ex.getStackTraceString() );
+        }
+        
+    }
+
+}
